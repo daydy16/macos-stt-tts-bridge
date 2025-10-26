@@ -1,62 +1,65 @@
 # macOS STT/TTS Bridge 🎤🔊
 
-> ⚠️ **Experimentell & AI-generiert** - Dieses Projekt wurde mit AI-Unterstützung entwickelt und befindet sich in aktiver Entwicklung. Bugs sind zu erwarten!
+> ⚠️ **Experimental & AI-Generated** - This project was developed with AI assistance and is in active development. Expect bugs!
 
-Native macOS Server-Anwendung, die Apples hochwertige Speech Recognition und Text-to-Speech Engines über eine HTTP/WebSocket API zugänglich macht. Perfekt für **Home Assistant** und andere lokale Automatisierungssysteme.
+Native macOS server application that makes Apple's high-quality Speech Recognition and Text-to-Speech engines accessible via HTTP/WebSocket API. Perfect for **Home Assistant** and other local automation systems.
 
 ## ✨ Features
 
-- 🎯 **Native macOS Speech Recognition** - Nutzt Apples eingebaute Speech Framework
-- 🗣️ **High-Quality TTS** - Natürlich klingende Sprachausgabe in vielen Sprachen
-- ⚡ **Streaming STT** - WebSocket-basiertes Echtzeit-Streaming für minimale Latenz
-- 🔒 **100% Lokal & Privat** - Keine Cloud, alle Daten bleiben auf deinem Mac
-- 🏠 **Home Assistant Integration** - Fertige Custom Component verfügbar
-- 🎨 **UI & Headless Modi** - Mit oder ohne grafische Oberfläche nutzbar
-- 🌍 **Multi-Language** - Unterstützt alle von macOS unterstützten Sprachen
+- 🎯 **Native macOS Speech Recognition** - Uses Apple's built-in Speech Framework
+- 🗣️ **High-Quality TTS** - Natural-sounding speech output in many languages
+- ⚡ **Streaming STT** - WebSocket-based real-time streaming for minimal latency
+- 🔒 **100% Local & Private** - No cloud, all data stays on your Mac
+- 🏠 **Home Assistant Integration** - Ready-made custom component available
+- 🎨 **UI & Headless Modes** - Run with or without graphical interface
+- 🌍 **Multi-Language** - Supports all languages supported by macOS
 
 ## 🚀 Quick Start
 
 ### Installation
 
-1. **App herunterladen:**
+1. **Download the app:**
+
    ```bash
-   # Lade die neueste Version von Releases
-   # Entpacke und verschiebe nach /Applications
+   # Download the latest version from Releases
+   # Extract and move to /Applications
    ```
 
-2. **Mit UI starten:**
-   - Doppelklick auf `STTBridge.app`
-   - Erlaube Mikrofon-Zugriff wenn gefragt
+2. **Start with UI:**
+   - Double-click on `STTBridge.app`
+   - Allow microphone access when prompted
 
-3. **Headless starten (ohne UI):**
+3. **Start headless (without UI):**
+
    ```bash
    /Applications/STTBridge.app/Contents/MacOS/STTBridge --headless
    ```
 
-### Als Service installieren
+### Install as Service
 
-Automatischer Start beim Login:
+Automatic startup on login:
 
 ```bash
-# In das Projektverzeichnis wechseln
-cd /pfad/zu/STTBridge
+# Change to project directory
+cd /path/to/STTBridge
 
-# Service installieren
+# Install service
 ./install-service.sh
 ```
 
-**Service-Befehle:**
+**Service commands:**
+
 ```bash
-# Status prüfen
+# Check status
 launchctl list | grep sttbridge
 
-# Stoppen
+# Stop
 launchctl unload ~/Library/LaunchAgents/io.github.daydy16.sttbridge.plist
 
-# Starten
+# Start
 launchctl load ~/Library/LaunchAgents/io.github.daydy16.sttbridge.plist
 
-# Logs ansehen
+# View logs
 tail -f /tmp/sttbridge.log
 ```
 
@@ -65,31 +68,34 @@ tail -f /tmp/sttbridge.log
 ### HTTP Endpoints
 
 **Speech-to-Text (HTTP POST):**
+
 ```bash
 curl -X POST http://localhost:8787/stt \
   -H "Content-Type: audio/wav" \
-  -H "X-Language: de-DE" \
+  -H "X-Language: en-US" \
   -H "X-Sample-Rate: 16000" \
   -H "X-Channel-Count: 1" \
   --data-binary @audio.wav
 ```
 
 **Text-to-Speech:**
+
 ```bash
-curl "http://localhost:8787/tts?text=Hallo%20Welt&lang=de-DE" -o output.wav
+curl "http://localhost:8787/tts?text=Hello%20World&lang=en-US" -o output.wav
 ```
 
-**Verfügbare Stimmen:**
+**Available voices:**
+
 ```bash
 curl http://localhost:8787/voices
 ```
 
 ### WebSocket Streaming STT
 
-Für Echtzeit-Spracherkennung:
+For real-time speech recognition:
 
 ```javascript
-const ws = new WebSocket('ws://localhost:8787/stt/stream?lang=de-DE');
+const ws = new WebSocket('ws://localhost:8787/stt/stream?lang=en-US');
 
 ws.onopen = () => {
   // Start message
@@ -97,7 +103,7 @@ ws.onopen = () => {
     type: 'start',
     sampleRate: 16000,
     channels: 1,
-    language: 'de-DE'
+    language: 'en-US'
   }));
   
   // Stream audio chunks
@@ -121,64 +127,65 @@ ws.onmessage = (event) => {
 
 ### Installation
 
-1. **HACS Installation (empfohlen):**
-   - Füge `https://github.com/daydy16/ha-local-macos-tts-stt` als Custom Repository hinzu
-   - Installiere "STT/TTS Bridge"
-   - Starte Home Assistant neu
+1. **HACS Installation (recommended):**
+   - Add `https://github.com/daydy16/ha-local-macos-tts-stt` as Custom Repository
+   - Install "STT/TTS Bridge"
+   - Restart Home Assistant
 
-2. **Manuelle Installation:**
+2. **Manual Installation:**
+
    ```bash
    cd config/custom_components
    git clone https://github.com/daydy16/ha-local-macos-tts-stt sttbridge
    ```
 
-### Konfiguration
+### Configuration
 
-1. Gehe zu **Einstellungen → Geräte & Dienste**
-2. Klicke **+ Integration hinzufügen**
-3. Suche nach "STT/TTS Bridge"
-4. Gib Host und Port ein (Standard: `localhost:8787`)
+1. Go to **Settings → Devices & Services**
+2. Click **+ Add Integration**
+3. Search for "STT/TTS Bridge"
+4. Enter host and port (default: `localhost:8787`)
 
-### Nutzung in Assist Pipeline
+### Usage in Assist Pipeline
 
-1. **Einstellungen → Voice Assistants → Assist**
-2. Wähle bei Speech-to-Text: `STT/TTS Bridge STT`
-3. Wähle bei Text-to-Speech: `STT/TTS Bridge TTS`
-4. Sprache: `de-DE` oder gewünschte Sprache
+1. **Settings → Voice Assistants → Assist**
+2. Select for Speech-to-Text: `STT/TTS Bridge STT`
+3. Select for Text-to-Speech: `STT/TTS Bridge TTS`
+4. Language: `en-US` or your desired language
 
-## ⚙️ Konfiguration
+## ⚙️ Configuration
 
-Die App nutzt Standard-Einstellungen, die für die meisten Anwendungen funktionieren:
+The app uses default settings that work for most applications:
 
 - **Host:** `127.0.0.1` (localhost)
 - **Port:** `8787`
-- **Auth Token:** Optional (kann in Config.swift gesetzt werden)
-- **Default Language:** `de-DE`
+- **Auth Token:** Optional (can be set in Config.swift)
+- **Default Language:** `en-US`
 
-Zum Anpassen editiere `STTBridge/Server/Config.swift` und kompiliere neu.
+To customize, edit `STTBridge/Server/Config.swift` and recompile.
 
-## 🔧 Entwicklung
+## 🔧 Development
 
-### Voraussetzungen
+### Requirements
 
 - macOS 13.0+
 - Xcode 15.0+
 - Swift 5.9+
 
-### Build von Source
+### Build from Source
 
 ```bash
-# Repository klonen
+# Clone repository
 git clone https://github.com/daydy16/macos-stt-tts-bridge.git
 cd macos-stt-tts-bridge
 
-# In Xcode öffnen
+# Open in Xcode
 open STTBridge.xcodeproj
 
 # Build & Run in Xcode (Cmd+R)
 ```
 
-### Projektstruktur
+### Project Structure
 
 ```
 STTBridge/
@@ -196,37 +203,37 @@ STTBridge/
     └── styles.css
 ```
 
-## 🐛 Bekannte Probleme
+## 🐛 Known Issues
 
-- [ ] Performance bei sehr langen Audio-Streams könnte optimiert werden
-- [ ] Keine Unterstützung für Batch-Verarbeitung
-- [ ] Auth-Token Implementierung ist basic
+- [ ] Performance with very long audio streams could be optimized
+- [ ] No support for batch processing
+- [ ] Auth token implementation is basic
 
 ## 🤝 Contributing
 
-Dieses Projekt ist experimentell und wurde größtenteils AI-generiert. Contributions sind willkommen!
+This project is experimental and was mostly AI-generated. Contributions are welcome!
 
-1. Fork das Repository
-2. Erstelle einen Feature Branch (`git checkout -b feature/amazing-feature`)
-3. Commit deine Änderungen (`git commit -m 'Add amazing feature'`)
-4. Push zum Branch (`git push origin feature/amazing-feature`)
-5. Öffne einen Pull Request
+1. Fork the repository
+2. Create a feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
 
-## 📝 Lizenz
+## 📝 License
 
-MIT License - siehe [LICENSE](LICENSE) Datei
+MIT License - see [LICENSE](LICENSE) file
 
 ## 🙏 Credits
 
-- Entwickelt mit ❤️ und AI-Unterstützung
-- Nutzt Apples Speech Framework und AVFoundation
-- Inspiriert von Wyoming Protocol und Rhasspy
+- Developed with ❤️ and AI assistance
+- Uses Apple's Speech Framework and AVFoundation
+- Inspired by Wyoming Protocol and Rhasspy
 
 ## ⚠️ Disclaimer
 
-Dies ist ein experimentelles Projekt, das mit AI-Unterstützung entwickelt wurde. 
-Es wird "as-is" bereitgestellt ohne Garantien. Nutze es auf eigenes Risiko!
+This is an experimental project developed with AI assistance.
+It is provided "as-is" without warranties. Use at your own risk!
 
 ---
 
-**Gefällt dir das Projekt? Star it! ⭐**
+**Like this project? Star it! ⭐**
