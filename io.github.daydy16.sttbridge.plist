@@ -27,6 +27,26 @@
     <dict>
         <key>PATH</key>
         <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+
+        <!-- STT backend: speechanalyzer (default) | legacy | whisperkit -->
+        <key>STT_ENGINE</key>
+        <string>speechanalyzer</string>
+        <key>DEFAULT_LANG</key>
+        <string>de-DE</string>
+
+        <!-- HTTP/WebSocket (browser test UI + existing HA custom integration).
+             Set BIND_HOST=0.0.0.0 if Home Assistant uses the custom HTTP/WS
+             integration and runs on a different host. -->
+        <key>BIND_HOST</key>
+        <string>127.0.0.1</string>
+        <key>PORT</key>
+        <string>8787</string>
+
+        <!-- Wyoming TCP transport (native HA integration, auto-discovered). -->
+        <key>WYOMING_ENABLED</key>
+        <string>true</string>
+        <key>WYOMING_PORT</key>
+        <string>10700</string>
     </dict>
 </dict>
 </plist>

@@ -4,4 +4,10 @@ h1{font-weight:700}
 .card{background:#14161a;padding:16px;border-radius:12px;margin:16px 0;border:1px solid #2a2e33;color:#e6eef7}
 .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin:8px 0}
 pre{background:#0a0f14;color:#7dd3fc;padding:12px;border-radius:8px;height:220px;overflow:auto}
+.muted{color:#8a94a3;font-size:.9rem;margin:4px 0 16px}
+.metrics{font-size:.9rem}
+.metric{background:rgba(125,211,252,.12);padding:4px 10px;border-radius:999px}
+.metric b{color:#38bdf8}
+button{cursor:pointer;border:1px solid #2a2e33;background:#1f6feb;color:#fff;padding:8px 14px;border-radius:8px}
+button:disabled{opacity:.5;cursor:default}
 @media (prefers-color-scheme: light){body{background:#f6f7fb;color:#1d232a}.card{background:#fff;border-color:#e0e6ee;color:#1d232a}pre{background:#111;color:#0bf}}

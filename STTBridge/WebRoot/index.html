@@ -8,8 +8,10 @@
 <body>
 <main>
   <h1>STTBridge – lokale Speech‑Bridge</h1>
+  <p id="engineLine" class="muted">Engine: …</p>
+
   <section class="card">
-    <h2>WebSocket STT</h2>
+    <h2>WebSocket STT (Streaming)</h2>
     <div class="row">
       <label>Sprache:</label><input id="lang" value="de-DE">
       <label><input id="offline" type="checkbox"> offline</label>
@@ -19,18 +21,30 @@
       <button id="startBtn">Start</button>
       <button id="stopBtn" disabled>Stop</button>
     </div>
+    <div class="row metrics">
+      <span class="metric">Erstes Partial: <b id="mPartial">–</b></span>
+      <span class="metric">Final: <b id="mFinal">–</b></span>
+    </div>
     <pre id="sttOut"></pre>
   </section>
+
   <section class="card">
     <h2>TTS</h2>
-    <div class="row"><textarea id="ttsText" rows="3">Hallo Stuttgart! Das ist eine lokale TTS‑Demo.</textarea></div>
+    <div class="row"><textarea id="ttsText" rows="3">Hallo Stuttgart! Das ist eine lokale TTS‑Demo. Sie streamt Satz für Satz.</textarea></div>
     <div class="row">
       <label>Stimme:</label><select id="voiceId"><option value="">Automatisch</option></select>
       <label>Rate:</label><input id="rate" type="number" min="0.5" max="2.0" step="0.1" value="1.0">
       <label>Pitch:</label><input id="pitch" type="number" min="-1" max="1" step="0.1" value="0">
       <label><input id="speakLocal" type="checkbox"> direkt am Mac ausgeben</label>
     </div>
-    <div class="row"><button id="ttsBtn">Sprechen</button></div>
+    <div class="row">
+      <button id="ttsBtn">Sprechen (einmalig)</button>
+      <button id="ttsStreamBtn">Streamen</button>
+    </div>
+    <div class="row metrics">
+      <span class="metric">Erstes Audio-Byte: <b id="mTtsFirst">–</b></span>
+      <span class="metric">Vollständig: <b id="mTtsDone">–</b></span>
+    </div>
     <audio id="player" controls></audio>
   </section>
 </main>

@@ -1,25 +1,26 @@
 import Foundation
 
-struct Healthz: Codable {
+nonisolated struct Healthz: Codable, Sendable {
     let status: String
     let lang: String
+    let engine: String
     let onDeviceSTT: Bool
 }
 
-struct STTWord: Codable, Sendable {
+nonisolated struct STTWord: Codable, Sendable {
     let token: String
     let start: Double
     let end: Double
 }
 
-struct STTResponse: Codable, Sendable {
+nonisolated struct STTResponse: Codable, Sendable {
     let text: String
     let isFinal: Bool
     let confidence: Double?
     let words: [STTWord]
 }
 
-struct TTSPayload: Codable {
+nonisolated struct TTSPayload: Codable, Sendable {
     let text: String
     let voiceId: String?
     let rate: Double?
@@ -27,14 +28,14 @@ struct TTSPayload: Codable {
     let speakLocal: Bool?
 }
 
-struct VoiceInfo: Codable {
+nonisolated struct VoiceInfo: Codable, Sendable {
     let name: String
     let identifier: String
     let language: String
     let quality: Int
 }
 
-enum APIError: Error {
+nonisolated enum APIError: Error {
     case badRequest(String)
     case unauthorized(String)
     case conflict(String)

@@ -16,12 +16,18 @@
 
 /* Begin PBXFileReference section */
 		63B83F6E2EADFE6E00544088 /* STTBridge.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = STTBridge.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		DD00000000000000000000A1 /* STTBridgeTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = STTBridgeTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 /* End PBXFileReference section */
 
 /* Begin PBXFileSystemSynchronizedRootGroup section */
 		63B83F702EADFE6E00544088 /* STTBridge */ = {
 			isa = PBXFileSystemSynchronizedRootGroup;
 			path = STTBridge;
+			sourceTree = "<group>";
+		};
+		DD00000000000000000000A2 /* STTBridgeTests */ = {
+			isa = PBXFileSystemSynchronizedRootGroup;
+			path = STTBridgeTests;
 			sourceTree = "<group>";
 		};
 /* End PBXFileSystemSynchronizedRootGroup section */
@@ -39,6 +45,13 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD00000000000000000000A5 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
@@ -46,6 +59,7 @@
 			isa = PBXGroup;
 			children = (
 				63B83F702EADFE6E00544088 /* STTBridge */,
+				DD00000000000000000000A2 /* STTBridgeTests */,
 				63B83F982EAE057400544088 /* Frameworks */,
 				63B83F6F2EADFE6E00544088 /* Products */,
 			);
@@ -55,6 +69,7 @@
 			isa = PBXGroup;
 			children = (
 				63B83F6E2EADFE6E00544088 /* STTBridge.app */,
+				DD00000000000000000000A1 /* STTBridgeTests.xctest */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -96,6 +111,29 @@
 			productReference = 63B83F6E2EADFE6E00544088 /* STTBridge.app */;
 			productType = "com.apple.product-type.application";
 		};
+		DD00000000000000000000A3 /* STTBridgeTests */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = DD00000000000000000000A7 /* Build configuration list for PBXNativeTarget "STTBridgeTests" */;
+			buildPhases = (
+				DD00000000000000000000A4 /* Sources */,
+				DD00000000000000000000A5 /* Frameworks */,
+				DD00000000000000000000A6 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+				DD00000000000000000000AA /* PBXTargetDependency */,
+			);
+			fileSystemSynchronizedGroups = (
+				DD00000000000000000000A2 /* STTBridgeTests */,
+			);
+			name = STTBridgeTests;
+			packageProductDependencies = (
+			);
+			productName = STTBridgeTests;
+			productReference = DD00000000000000000000A1 /* STTBridgeTests.xctest */;
+			productType = "com.apple.product-type.bundle.unit-test";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -108,6 +146,10 @@
 				TargetAttributes = {
 					63B83F6D2EADFE6E00544088 = {
 						CreatedOnToolsVersion = 26.0.1;
+					};
+					DD00000000000000000000A3 = {
+						CreatedOnToolsVersion = 26.0.1;
+						TestTargetID = 63B83F6D2EADFE6E00544088;
 					};
 				};
 			};
@@ -129,12 +171,20 @@
 			projectRoot = "";
 			targets = (
 				63B83F6D2EADFE6E00544088 /* STTBridge */,
+				DD00000000000000000000A3 /* STTBridgeTests */,
 			);
 		};
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
 		63B83F6C2EADFE6E00544088 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		DD00000000000000000000A6 /* Resources */ = {
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -151,7 +201,32 @@
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
+		DD00000000000000000000A4 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
 /* End PBXSourcesBuildPhase section */
+
+/* Begin PBXTargetDependency section */
+		DD00000000000000000000AA /* PBXTargetDependency */ = {
+			isa = PBXTargetDependency;
+			target = 63B83F6D2EADFE6E00544088 /* STTBridge */;
+			targetProxy = DD00000000000000000000AB /* PBXContainerItemProxy */;
+		};
+/* End PBXTargetDependency section */
+
+/* Begin PBXContainerItemProxy section */
+		DD00000000000000000000AB /* PBXContainerItemProxy */ = {
+			isa = PBXContainerItemProxy;
+			containerPortal = 63B83F662EADFE6E00544088 /* Project object */;
+			proxyType = 1;
+			remoteGlobalIDString = 63B83F6D2EADFE6E00544088;
+			remoteInfo = STTBridge;
+		};
+/* End PBXContainerItemProxy section */
 
 /* Begin XCBuildConfiguration section */
 		63B83F7C2EADFE7000544088 /* Debug */ = {
@@ -356,6 +431,36 @@
 			};
 			name = Release;
 		};
+		DD00000000000000000000A8 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dfl.STTBridgeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/STTBridge.app/Contents/MacOS/STTBridge";
+			};
+			name = Debug;
+		};
+		DD00000000000000000000A9 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				BUNDLE_LOADER = "$(TEST_HOST)";
+				CODE_SIGN_STYLE = Automatic;
+				GENERATE_INFOPLIST_FILE = YES;
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = dfl.STTBridgeTests;
+				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_EMIT_LOC_STRINGS = NO;
+				SWIFT_VERSION = 5.0;
+				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/STTBridge.app/Contents/MacOS/STTBridge";
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -373,6 +478,15 @@
 			buildConfigurations = (
 				63B83F7F2EADFE7000544088 /* Debug */,
 				63B83F802EADFE7000544088 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		DD00000000000000000000A7 /* Build configuration list for PBXNativeTarget "STTBridgeTests" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				DD00000000000000000000A8 /* Debug */,
+				DD00000000000000000000A9 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

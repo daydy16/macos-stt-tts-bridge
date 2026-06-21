@@ -30,32 +30,53 @@ struct STTBridgeApp: App {
 
 final class ServerManager: ObservableObject {
     @Published var status: String = "Startet…"
-    private var server: HTTPServer?
+    private var httpServer: HTTPServer?
+    private var wyomingServer: WyomingServer?
 
     init() {
+        // Legacy SFSpeechRecognizer still needs authorization; harmless for
+        // SpeechAnalyzer (which runs on-device without it).
         SFSpeechRecognizer.requestAuthorization { st in
             print("Speech auth: \(st)")
         }
+
         let cfg = Config()
+        let stt = STTService(config: cfg)
+        let tts = TTSEngine()
+
+        let headless = CommandLine.arguments.contains("--headless") ||
+                       CommandLine.arguments.contains("--no-ui")
+
+        // HTTP + WebSocket (browser test UI + existing HA custom integration).
         DispatchQueue.global(qos: .userInitiated).async {
-            let srv = HTTPServer(config: cfg)
-            self.server = srv
+            let server = HTTPServer(config: cfg, stt: stt, tts: tts)
+            self.httpServer = server
             do {
-                let msg = "Server läuft auf http://\(cfg.bindHost):\(cfg.port)"
+                let msg = "Server läuft auf http://\(cfg.bindHost):\(cfg.port)  (Engine: \(cfg.sttEngine.rawValue))"
                 DispatchQueue.main.async { self.status = msg }
-                
-                // Print to console for headless mode
-                if CommandLine.arguments.contains("--headless") || 
-                   CommandLine.arguments.contains("--no-ui") {
+                if headless {
                     print("✓ \(msg)")
                     print("✓ Drücke Ctrl+C zum Beenden")
                 }
-                
-                try srv.start()
+                try server.start()
             } catch {
-                let errMsg = "Serverfehler: \(error)"
+                let errMsg = "Serverfehler (HTTP): \(error)"
                 DispatchQueue.main.async { self.status = errMsg }
                 print("✗ \(errMsg)")
+            }
+        }
+
+        // Wyoming TCP transport (native Home Assistant integration).
+        if cfg.wyomingEnabled {
+            DispatchQueue.global(qos: .userInitiated).async {
+                let server = WyomingServer(config: cfg, stt: stt, tts: tts)
+                self.wyomingServer = server
+                do {
+                    if headless { print("✓ Wyoming TCP auf \(cfg.wyomingBindHost):\(cfg.wyomingPort)") }
+                    try server.start()
+                } catch {
+                    print("✗ Serverfehler (Wyoming): \(error)")
+                }
             }
         }
     }

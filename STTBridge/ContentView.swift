@@ -16,7 +16,9 @@ class AppViewModel: ObservableObject {
     @Published var isRecording: Bool = false
 
     private let ttsEngine = TTSEngine()
-    private var sttSession: STTStreamSession?
+    private let stt = STTService(config: Config())
+    private var sttSession: STTSession?
+    private var resultsTask: Task<Void, Never>?
     private var audioEngine: AVAudioEngine?
 
     init() {
@@ -82,44 +84,32 @@ class AppViewModel: ObservableObject {
     }
 
     private func setupAndStartSTT() {
-        do {
-            sttSession = try STTStreamSession(lang: "de-DE", requiresOnDevice: true)
-            sttSession?.onPartial = { [weak self] text in self?.sttText = text }
-            sttSession?.onFinal = { [weak self] text, _ in self?.sttText = text }
-            sttSession?.onError = { [weak self] error in
-                self?.sttText = "STT Fehler: \(error.localizedDescription)"
-                self?.stopSTT()
-            }
+        Task { @MainActor in
+            do {
+                let session = try await stt.startSession(lang: "de-DE", requireOnDevice: true)
+                self.sttSession = session
 
-            audioEngine = AVAudioEngine()
-            let inputNode = audioEngine!.inputNode
-            let recordingFormat = inputNode.outputFormat(forBus: 0)
-            let targetFormat = AVAudioFormat(commonFormat: .pcmFormatInt16, sampleRate: 16000, channels: 1, interleaved: true)!
-            let converter = AVAudioConverter(from: recordingFormat, to: targetFormat)!
-
-            inputNode.installTap(onBus: 0, bufferSize: 4096, format: recordingFormat) { [weak self] (buffer, _) in
-                let pcmBuffer = AVAudioPCMBuffer(pcmFormat: targetFormat, frameCapacity: 4096)!
-                var error: NSError? = nil
-                let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
-                    outStatus.pointee = .haveData
-                    return buffer
+                // Forward partial + final results to the UI.
+                self.resultsTask = Task { @MainActor in
+                    for await result in session.results {
+                        self.sttText = result.text
+                    }
                 }
-                converter.convert(to: pcmBuffer, error: &error, withInputFrom: inputBlock)
 
-                if error != nil { return }
-                
-                let channelData = pcmBuffer.int16ChannelData![0]
-                let channelDataSize = Int(pcmBuffer.frameLength) * Int(pcmBuffer.format.streamDescription.pointee.mBytesPerFrame)
-                let data = Data(bytes: channelData, count: channelDataSize)
-                try? self?.sttSession?.append(data)
+                // Feed mic audio; the session converts to the engine's format.
+                let audioEngine = AVAudioEngine()
+                self.audioEngine = audioEngine
+                let inputNode = audioEngine.inputNode
+                let recordingFormat = inputNode.outputFormat(forBus: 0)
+                inputNode.installTap(onBus: 0, bufferSize: 2048, format: recordingFormat) { buffer, _ in
+                    session.append(buffer)
+                }
+                audioEngine.prepare()
+                try audioEngine.start()
+            } catch {
+                self.sttText = "Fehler beim Starten von STT: \(error.localizedDescription)"
+                self.isRecording = false
             }
-
-            audioEngine?.prepare()
-            try audioEngine?.start()
-
-        } catch {
-            sttText = "Fehler beim Starten von STT: \(error.localizedDescription)"
-            isRecording = false
         }
     }
 
@@ -128,8 +118,10 @@ class AppViewModel: ObservableObject {
         audioEngine?.stop()
         audioEngine?.inputNode.removeTap(onBus: 0)
         audioEngine = nil
-        sttSession?.stop()
+        let session = sttSession
         sttSession = nil
+        resultsTask = nil
+        Task { await session?.finishAudio() }
     }
 }
 

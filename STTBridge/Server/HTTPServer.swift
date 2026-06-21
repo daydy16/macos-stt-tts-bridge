@@ -7,21 +7,22 @@ import AVFoundation
 import Speech
 
 extension ByteBuffer {
-    mutating func readData(length: Int) -> Data? {
+    nonisolated mutating func readData(length: Int) -> Data? {
         guard let bytes = self.readBytes(length: length) else { return nil }
         return Data(bytes)
     }
 }
 
-final class HTTPServer {
+nonisolated final class HTTPServer {
     private let group = MultiThreadedEventLoopGroup(numberOfThreads: System.coreCount)
     private let cfg: Config
-    private let stt: STTEngine
-    private let tts = TTSEngine()
+    let stt: STTService
+    let tts: TTSEngine
 
-    init(config: Config) {
+    init(config: Config, stt: STTService, tts: TTSEngine) {
         self.cfg = config
-        self.stt = STTEngine(config: config)
+        self.stt = stt
+        self.tts = tts
     }
 
     func start() throws {
@@ -46,7 +47,7 @@ final class HTTPServer {
             .childChannelOption(ChannelOptions.recvAllocator, value: AdaptiveRecvByteBufferAllocator())
 
         let ch = try bootstrap.bind(host: cfg.bindHost, port: cfg.port).wait()
-        print("🔊 STTBridge läuft auf http://\(cfg.bindHost):\(cfg.port)")
+        print("🔊 STTBridge HTTP/WS läuft auf http://\(cfg.bindHost):\(cfg.port)")
         try ch.closeFuture.wait()
     }
 
@@ -86,29 +87,12 @@ final class HTTPServer {
             }
         }
 
-        do {
-            let session = try STTStreamSession(lang: lang, requiresOnDevice: offline || cfg.offlineOnly)
-            let wsHandler = WebSocketStreamHandler(session: session, sendPartials: partials)
-            session.onPartial = { [weak wsHandler] text in wsHandler?.send(json: ["type":"partial","text":text]) }
-            session.onFinal   = { [weak wsHandler] text, conf in
-                var obj: [String:Any] = ["type":"final","text":text]
-                if let c = conf { obj["confidence"] = c }
-                wsHandler?.send(json: obj)
-            }
-            session.onError   = { [weak wsHandler] err in wsHandler?.send(json: ["type":"error","error":"\(err)"])
-            }
-            return channel.pipeline.addHandler(wsHandler, name: "ws-handler", position: .last)
-        } catch {
-            var buf = channel.allocator.buffer(capacity: 0)
-            buf.writeString("{\"type\":\"error\",\"error\":\"\(error)\"}")
-            let frame = WebSocketFrame(fin: true, opcode: .text, data: buf)
-            channel.writeAndFlush(frame, promise: nil)
-            return channel.close()
-        }
+        let wsHandler = WebSocketStreamHandler(service: stt, lang: lang, requireOnDevice: offline, sendPartials: partials)
+        return channel.pipeline.addHandler(wsHandler, name: "ws-handler", position: .last)
     }
 
     // MARK: HTTP Handler
-    final class HTTPHandler: ChannelInboundHandler {
+    nonisolated final class HTTPHandler: ChannelInboundHandler, @unchecked Sendable {
         typealias InboundIn = HTTPServerRequestPart
         typealias OutboundOut = HTTPServerResponsePart
 
@@ -178,6 +162,10 @@ final class HTTPServer {
             writeJSON(context, value: ["error": error.message], status: .init(statusCode: error.statusCode), extra: extra)
         }
 
+        private func query(_ uri: String, _ name: String) -> String? {
+            URLComponents(string: uri)?.queryItems?.first(where: { $0.name == name })?.value
+        }
+
         private func route(context: ChannelHandlerContext, head: HTTPRequestHead, body: ByteBuffer) {
             let origin = head.headers.first(name: "Origin")
             let extra = corsHeaders(for: origin)
@@ -189,14 +177,26 @@ final class HTTPServer {
             let path = URL(string: head.uri)?.path ?? head.uri
             switch (head.method, path) {
             case (.GET, "/healthz"):
-                let supported = server.stt.onDeviceSupported(lang: server.cfg.defaultLang)
-                writeJSON(context, value: Healthz(status: "ok", lang: server.cfg.defaultLang, onDeviceSTT: supported), extra: extra)
+                let lang = server.cfg.defaultLang
+                let engineId = server.stt.engineId
+                Task {
+                    let supported = await server.stt.onDeviceSupported(lang: lang)
+                    context.eventLoop.execute {
+                        self.writeJSON(context, value: Healthz(status: "ok", lang: lang, engine: engineId, onDeviceSTT: supported), extra: extra)
+                    }
+                }
 
             case (.GET, "/languages"):
-                writeJSON(context, value: server.stt.languages(), extra: extra)
+                Task {
+                    let langs = await server.stt.languages()
+                    context.eventLoop.execute { self.writeJSON(context, value: langs, extra: extra) }
+                }
 
             case (.GET, "/voices"):
-                writeJSON(context, value: server.tts.listVoices(), extra: extra)
+                Task { @MainActor in
+                    let voices = server.tts.listVoices()
+                    context.eventLoop.execute { self.writeJSON(context, value: voices, extra: extra) }
+                }
 
             case (.GET, "/"):
                 if let url = Bundle.main.url(forResource: "index", withExtension: "html", subdirectory: "WebRoot"),
@@ -218,35 +218,29 @@ final class HTTPServer {
 
             case (.POST, "/stt"):
                 if let err = verifyAuth(head) { writeError(context, err, extra: extra); return }
-                let comps = URLComponents(string: head.uri)
-                let lang = comps?.queryItems?.first(where: { $0.name == "lang" })?.value ?? 
-                           head.headers.first(name: "X-Language") ?? 
-                           server.cfg.defaultLang
-                let offline = (server.cfg.offlineOnly || ((comps?.queryItems?.first(where: { $0.name == "offline" })?.value ?? "false").lowercased() == "true"))
+                let lang = query(head.uri, "lang")
+                    ?? head.headers.first(name: "X-Language")
+                    ?? server.cfg.defaultLang
+                let requireOnDevice = server.cfg.offlineOnly || (query(head.uri, "offline")?.lowercased() == "true")
                 let ct = head.headers.first(name: "Content-Type")?.lowercased() ?? "application/octet-stream"
                 var copy = body
                 let payload = copy.readData(length: body.readableBytes) ?? Data()
-                
-                // Extract sample rate and channel count from headers (for Home Assistant compatibility)
                 let sampleRateHeader = head.headers.first(name: "X-Sample-Rate")
                 let channelCountHeader = head.headers.first(name: "X-Channel-Count")
-                
-                Task.detached {
+
+                Task {
                     do {
                         let resp: STTResponse
                         if ct.contains("audio/l16") {
-                            // Explicit raw PCM
-                            let sr = Double(head.headers.first(name: "X-Sample-Rate") ?? "16000") ?? 16000
-                            let ch = Int(head.headers.first(name: "X-Channel-Count") ?? "1") ?? 1
-                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: sr, channels: ch, lang: lang, offline: offline)
+                            let sr = Double(sampleRateHeader ?? "16000") ?? 16000
+                            let ch = Int(channelCountHeader ?? "1") ?? 1
+                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: sr, channels: ch, lang: lang, requireOnDevice: requireOnDevice)
                         } else if let srStr = sampleRateHeader, let chStr = channelCountHeader {
-                            // WAV with metadata headers (Home Assistant sends this)
                             let sr = Double(srStr) ?? 16000
                             let ch = Int(chStr) ?? 1
-                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: sr, channels: ch, lang: lang, offline: offline)
+                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: sr, channels: ch, lang: lang, requireOnDevice: requireOnDevice)
                         } else {
-                            // Regular WAV file
-                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: nil, channels: nil, lang: lang, offline: offline)
+                            resp = try await self.server.stt.transcribeRaw(data: payload, sampleRate: nil, channels: nil, lang: lang, requireOnDevice: requireOnDevice)
                         }
                         context.eventLoop.execute { self.writeJSON(context, value: resp, extra: extra) }
                     } catch let e as APIError {
@@ -255,6 +249,35 @@ final class HTTPServer {
                         context.eventLoop.execute { self.writeError(context, .internalError("Interner Fehler"), extra: extra) }
                     }
                 }
+
+            case (.GET, "/tts"):
+                if let err = verifyAuth(head) { writeError(context, err, extra: extra); return }
+                guard let text = query(head.uri, "text"), !text.isEmpty else {
+                    writeError(context, .badRequest("Parameter 'text' fehlt"), extra: extra); return
+                }
+                let lang = query(head.uri, "lang")
+                let voiceId = query(head.uri, "voiceId")
+                let rate = query(head.uri, "rate").flatMap { Double($0) }
+                let pitch = query(head.uri, "pitch").flatMap { Double($0) }
+                Task {
+                    do {
+                        let wav = try await self.server.tts.synthesizeToWAV(text: text, voiceId: voiceId, rate: rate, pitch: pitch, language: lang)
+                        context.eventLoop.execute { self.writeBytes(context, data: wav, contentType: "audio/wav", extra: extra) }
+                    } catch {
+                        context.eventLoop.execute { self.writeError(context, .internalError("TTS-Fehler: \(error)"), extra: extra) }
+                    }
+                }
+
+            case (.GET, "/tts/stream"):
+                if let err = verifyAuth(head) { writeError(context, err, extra: extra); return }
+                guard let text = query(head.uri, "text"), !text.isEmpty else {
+                    writeError(context, .badRequest("Parameter 'text' fehlt"), extra: extra); return
+                }
+                let lang = query(head.uri, "lang")
+                let voiceId = query(head.uri, "voiceId")
+                let rate = query(head.uri, "rate").flatMap { Double($0) }
+                let pitch = query(head.uri, "pitch").flatMap { Double($0) }
+                streamTTS(context: context, text: text, lang: lang, voiceId: voiceId, rate: rate, pitch: pitch, extra: extra)
 
             case (.POST, "/tts"):
                 if let err = verifyAuth(head) { writeError(context, err, extra: extra); return }
@@ -285,37 +308,157 @@ final class HTTPServer {
                 context.writeAndFlush(self.wrapOutboundOut(.end(nil)), promise: nil)
             }
         }
+
+        /// Sentence-streamed TTS as chunked raw PCM16 (`audio/l16`). The first
+        /// chunk is flushed the moment the first sentence is synthesized, so the
+        /// browser can measure (and start playing on) first-audio latency.
+        private func streamTTS(context: ChannelHandlerContext, text: String, lang: String?, voiceId: String?, rate: Double?, pitch: Double?, extra: HTTPHeaders) {
+            let sr = server.cfg.ttsSampleRate
+            var headers = extra
+            headers.add(name: "Content-Type", value: "audio/l16")
+            headers.add(name: "X-Sample-Rate", value: "\(sr)")
+            headers.add(name: "X-Channel-Count", value: "1")
+            headers.add(name: "Cache-Control", value: "no-store")
+            headers.add(name: "Transfer-Encoding", value: "chunked") // stream chunks as synthesized
+            let respHead = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
+            context.write(self.wrapOutboundOut(.head(respHead)), promise: nil)
+            context.flush()
+
+            let channel = context.channel
+            let tts = server.tts
+            Task { @MainActor in
+                let stream = tts.synthesizeStream(text: text, voiceId: voiceId, rate: rate, pitch: pitch, language: lang, sampleRate: sr)
+                for await pcm in stream {
+                    var buf = channel.allocator.buffer(capacity: pcm.count)
+                    buf.writeBytes(pcm)
+                    channel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(buf)), promise: nil)
+                }
+                channel.writeAndFlush(HTTPServerResponsePart.end(nil), promise: nil)
+            }
+        }
     }
 }
 
 // MARK: WebSocket stream handler
-final class WebSocketStreamHandler: ChannelInboundHandler {
+
+/// Bridges the browser test-UI WebSocket protocol to a transport-agnostic
+/// ``STTSession``. Audio frames arriving before the (async) session is ready are
+/// buffered and replayed once it attaches.
+nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecked Sendable {
     typealias InboundIn = WebSocketFrame
-    private let session: STTStreamSession
+
+    private let service: STTService
+    private let lang: String
+    private let requireOnDevice: Bool
     private let sendPartials: Bool
     private weak var channel: Channel?
 
-    init(session: STTStreamSession, sendPartials: Bool) {
-        self.session = session; self.sendPartials = sendPartials
+    private let lock = NSLock()
+    private var session: STTSession?
+    private var pending: [Data] = []
+    private var ready = false
+    private var ended = false
+
+    init(service: STTService, lang: String, requireOnDevice: Bool, sendPartials: Bool) {
+        self.service = service
+        self.lang = lang
+        self.requireOnDevice = requireOnDevice
+        self.sendPartials = sendPartials
     }
-    func handlerAdded(context: ChannelHandlerContext) { self.channel = context.channel }
+
+    func handlerAdded(context: ChannelHandlerContext) {
+        channel = context.channel
+        let service = self.service
+        let lang = self.lang
+        let rod = self.requireOnDevice
+        Task { [weak self] in
+            do {
+                let session = try await service.startSession(lang: lang, requireOnDevice: rod)
+                self?.attach(session)
+            } catch {
+                self?.send(json: ["type": "error", "error": "\(error)"])
+                self?.channel?.close(promise: nil)
+            }
+        }
+    }
 
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let frame = self.unwrapInboundIn(data)
         switch frame.opcode {
         case .binary:
-            var d = frame.data; let n = d.readableBytes
-            if let payload = d.readData(length: n) { try? session.append(payload) }
+            var d = frame.data
+            guard let payload = d.readData(length: d.readableBytes) else { return }
+            lock.lock()
+            let isReady = ready
+            if !isReady { pending.append(payload) }
+            lock.unlock()
+            if isReady { feed(payload) }
+        case .text:
+            var d = frame.data
+            if let payload = d.readData(length: d.readableBytes),
+               let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
+               (obj["type"] as? String) == "end" {
+                endStream()
+            }
         case .connectionClose:
-            session.stop(); context.close(promise: nil)
-        default: break
+            endStream()
+            context.close(promise: nil)
+        default:
+            break
         }
     }
-    func handlerRemoved(context: ChannelHandlerContext) { session.stop() }
 
-    func send(json: [String:Any]) {
+    func handlerRemoved(context: ChannelHandlerContext) {
+        endStream()
+    }
+
+    // MARK: - Session wiring
+
+    private func attach(_ session: STTSession) {
+        lock.lock()
+        self.session = session
+        ready = true
+        let buffered = pending
+        pending.removeAll()
+        let alreadyEnded = ended
+        lock.unlock()
+
+        for data in buffered { feed(data) }
+
+        Task { [weak self] in
+            for await result in session.results {
+                guard let self else { return }
+                if result.isFinal {
+                    var obj: [String: Any] = ["type": "final", "text": result.text]
+                    if let c = result.confidence { obj["confidence"] = c }
+                    self.send(json: obj)
+                } else if self.sendPartials {
+                    self.send(json: ["type": "partial", "text": result.text])
+                }
+            }
+        }
+
+        // The client may have ended before the session was ready.
+        if alreadyEnded { Task { await session.finishAudio() } }
+    }
+
+    private func feed(_ data: Data) {
+        guard let buffer = AudioBufferUtil.int16Buffer(from: data, sampleRate: 16_000, channels: 1) else { return }
+        lock.lock(); let s = session; lock.unlock()
+        s?.append(buffer)
+    }
+
+    private func endStream() {
+        lock.lock()
+        if ended { lock.unlock(); return }
+        ended = true
+        let s = session
+        lock.unlock()
+        if let s { Task { await s.finishAudio() } }
+    }
+
+    func send(json: [String: Any]) {
         guard let ch = channel else { return }
-        if !sendPartials, (json["type"] as? String) == "partial" { return }
         guard let data = try? JSONSerialization.data(withJSONObject: json) else { return }
         var buf = ch.allocator.buffer(capacity: data.count); buf.writeBytes(data)
         ch.writeAndFlush(WebSocketFrame(fin: true, opcode: .text, data: buf), promise: nil)

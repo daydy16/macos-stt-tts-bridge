@@ -2,17 +2,18 @@
 
 > ⚠️ **Experimental & AI-Generated** - This project was developed with AI assistance and is in active development. Expect bugs!
 
-Native macOS server application that makes Apple's high-quality Speech Recognition and Text-to-Speech engines accessible via HTTP/WebSocket API. Perfect for **Home Assistant** and other local automation systems.
+Native macOS server application that makes Apple's high-quality Speech Recognition and Text-to-Speech engines accessible via a **Wyoming** TCP transport (native Home Assistant) and an HTTP/WebSocket API (browser test UI + the existing custom HA integration). Built for **low-latency, fully-local** voice on an Apple Silicon home server.
 
 ## ✨ Features
 
-- 🎯 **Native macOS Speech Recognition** - Uses Apple's built-in Speech Framework
-- 🗣️ **High-Quality TTS** - Natural-sounding speech output in many languages
-- ⚡ **Streaming STT** - WebSocket-based real-time streaming for minimal latency
-- 🔒 **100% Local & Private** - No cloud, all data stays on your Mac
-- 🏠 **Home Assistant Integration** - Ready-made custom component available
-- 🎨 **UI & Headless Modes** - Run with or without graphical interface
-- 🌍 **Multi-Language** - Supports all languages supported by macOS
+- 🚀 **Modern streaming STT** — built on Apple's `SpeechAnalyzer` / `SpeechTranscriber` (macOS 26+, Apple Neural Engine), with live volatile (partial) results and **instant finalization** on end-of-speech.
+- 🔌 **Pluggable engines** — `SpeechAnalyzer` (default), legacy `SFSpeechRecognizer` (A/B flag), and optional **WhisperKit** — selectable via `STT_ENGINE`.
+- 🏠 **Wyoming protocol** — native TCP transport (port 10700) auto-discovered by Home Assistant's built-in Wyoming integration. No custom component required.
+- 🗣️ **Streaming TTS** — sentence-by-sentence synthesis so playback starts before the full answer is rendered (`AVSpeechSynthesizer`, system/enhanced voices).
+- ⚡ **Low latency by design** — in-memory audio (no disk I/O), warm models, small frames, streamed both ways. The browser UI shows live first-partial / final / first-TTS-byte readouts.
+- 🔒 **100% local & private** — no cloud, no network egress (the app ships sandboxed with outgoing connections disabled).
+- 🎨 **UI & headless modes** — run with or without a window; ships as a launchd service.
+- 🌍 **Multi-language, German-first** — `de-DE` by default.
 
 ## 🚀 Quick Start
 
@@ -63,16 +64,31 @@ launchctl load ~/Library/LaunchAgents/io.github.daydy16.sttbridge.plist
 tail -f /tmp/sttbridge.log
 ```
 
-## 📡 API Endpoints
+## 📡 Transports & API
+
+The bridge exposes **two transports over one shared engine core**:
+
+| Transport | Port | Consumer |
+|-----------|------|----------|
+| **Wyoming TCP** | `10700` | Home Assistant (built-in Wyoming integration, auto-discovered) |
+| **HTTP / WebSocket** | `8787` | Browser test UI + the existing custom HA integration |
 
 ### HTTP Endpoints
 
-**Speech-to-Text (HTTP POST):**
+**Health / engine info:**
+
+```bash
+curl http://localhost:8787/healthz      # {status, lang, engine, onDeviceSTT}
+curl http://localhost:8787/languages    # supported BCP-47 locales for the active engine
+curl http://localhost:8787/voices       # available TTS voices
+```
+
+**Speech-to-Text (HTTP POST, one-shot):**
 
 ```bash
 curl -X POST http://localhost:8787/stt \
   -H "Content-Type: audio/wav" \
-  -H "X-Language: en-US" \
+  -H "X-Language: de-DE" \
   -H "X-Sample-Rate: 16000" \
   -H "X-Channel-Count: 1" \
   --data-binary @audio.wav
@@ -81,13 +97,11 @@ curl -X POST http://localhost:8787/stt \
 **Text-to-Speech:**
 
 ```bash
-curl "http://localhost:8787/tts?text=Hello%20World&lang=en-US" -o output.wav
-```
+# One-shot WAV (back-compat)
+curl "http://localhost:8787/tts?text=Hallo%20Welt&lang=de-DE" -o output.wav
 
-**Available voices:**
-
-```bash
-curl http://localhost:8787/voices
+# Streaming: chunked raw PCM16 (audio/l16), first bytes arrive per sentence
+curl "http://localhost:8787/tts/stream?text=Hallo.%20Wie%20geht%20es%20dir?&lang=de-DE" -o stream.l16
 ```
 
 ### WebSocket Streaming STT
@@ -125,52 +139,58 @@ ws.onmessage = (event) => {
 
 ## 🏠 Home Assistant Integration
 
-### Installation
+### Option A — Wyoming (recommended, native)
 
-1. **HACS Installation (recommended):**
-   - Add `https://github.com/daydy16/ha-local-macos-tts-stt` as Custom Repository
-   - Install "STT/TTS Bridge"
-   - Restart Home Assistant
+The bridge speaks the Wyoming protocol on TCP **10700** and advertises itself over Bonjour (`_wyoming._tcp.`), so Home Assistant auto-discovers it.
 
-2. **Manual Installation:**
+1. HA shows a discovered **Wyoming Protocol** device → click **Configure** (or add the *Wyoming Protocol* integration manually and enter the Mac's IP + port `10700`).
+2. **Settings → Voice Assistants → Assist**: pick the bridge for Speech-to-Text and Text-to-Speech.
 
-   ```bash
-   cd config/custom_components
-   git clone https://github.com/daydy16/ha-local-macos-tts-stt sttbridge
-   ```
+No custom component, nothing to maintain against HA releases. The bridge must be reachable from HA — Wyoming binds `0.0.0.0` by default.
 
-### Configuration
+### Option B — Custom HTTP/WS integration (legacy)
 
-1. Go to **Settings → Devices & Services**
-2. Click **+ Add Integration**
-3. Search for "STT/TTS Bridge"
-4. Enter host and port (default: `localhost:8787`)
+Still fully supported via the `/stt`, `/voices`, `/tts`, and `/stt/stream` endpoints:
 
-### Usage in Assist Pipeline
+1. HACS → add `https://github.com/daydy16/ha-local-macos-tts-stt` as a custom repository, install "STT/TTS Bridge", restart HA.
+2. **Settings → Devices & Services → + Add Integration → STT/TTS Bridge**, enter host:port (default `localhost:8787`). For a remote HA set `BIND_HOST=0.0.0.0`.
 
-1. **Settings → Voice Assistants → Assist**
-2. Select for Speech-to-Text: `STT/TTS Bridge STT`
-3. Select for Text-to-Speech: `STT/TTS Bridge TTS`
-4. Language: `en-US` or your desired language
+### Latency tuning (read this)
 
-## ⚙️ Configuration
+End-to-end latency through HA is dominated by the **Assist silence-detection (VAD) timeout**, not raw recognition. In your Assist pipeline lower the end-of-speech silence window if responses feel slow — the bridge finalizes the transcript the instant audio stops, so the perceived delay is almost entirely the VAD window.
 
-The app uses default settings that work for most applications:
+## ⚙️ Configuration (environment variables)
 
-- **Host:** `127.0.0.1` (localhost)
-- **Port:** `8787`
-- **Auth Token:** Optional (can be set in Config.swift)
-- **Default Language:** `en-US`
+All configuration is via environment variables (set them in the launchd plist). No recompile needed.
 
-To customize, edit `STTBridge/Server/Config.swift` and recompile.
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `STT_ENGINE` | `speechanalyzer` | `speechanalyzer` \| `legacy` \| `whisperkit` |
+| `DEFAULT_LANG` | `de-DE` | Default recognition/synthesis locale |
+| `PORT` | `8787` | HTTP/WebSocket port |
+| `BIND_HOST` | `127.0.0.1` | HTTP/WS bind host (`0.0.0.0` for remote HA) |
+| `OFFLINE_ONLY` | `false` | Force on-device recognition everywhere |
+| `WYOMING_ENABLED` | `true` | Enable the Wyoming TCP transport |
+| `WYOMING_PORT` | `10700` | Wyoming TCP port |
+| `WYOMING_BONJOUR` | `true` | Advertise via Bonjour for HA auto-discovery |
+| `SERVICE_NAME` | `macOS STT/TTS Bridge` | Name shown in HA / Bonjour |
+| `TTS_SAMPLE_RATE` | `22050` | Output sample rate for streaming TTS |
+| `WHISPER_MODEL` | `large-v3-v20240930_626MB` | WhisperKit model (multilingual; avoid `.en`) |
+| `AUTH_TOKEN` | _(none)_ | If set, required on HTTP/WS requests |
+
+### A/B comparison
+
+`SpeechAnalyzer` is the default. To compare against the legacy recognizer set `STT_ENGINE=legacy` and restart; `/healthz` reports the active engine.
 
 ## 🔧 Development
 
 ### Requirements
 
-- macOS 13.0+
-- Xcode 15.0+
-- Swift 5.9+
+- **macOS 26.0+** (required for `SpeechAnalyzer` / `SpeechTranscriber`)
+- Xcode 26+
+- Apple Silicon recommended (Apple Neural Engine)
+
+> First run downloads the `de-DE` SpeechAnalyzer language assets (system-managed, one-time). If the sandbox blocks the download, install the German dictation/voice assets once via **System Settings → Accessibility → Spoken Content / Keyboard → Dictation**.
 
 ### Build from Source
 
@@ -189,25 +209,51 @@ open STTBridge.xcodeproj
 
 ```
 STTBridge/
-├── STTBridgeApp.swift      # Main App & UI Toggle
-├── ContentView.swift        # SwiftUI Interface
+├── STTBridgeApp.swift          # App entry; boots HTTP + Wyoming servers
+├── ContentView.swift           # SwiftUI status window
 ├── Server/
-│   ├── HTTPServer.swift     # HTTP/WebSocket Server
-│   ├── STTEngine.swift      # Speech Recognition
-│   ├── TTSEngine.swift      # Text-to-Speech
-│   ├── Config.swift         # Configuration
-│   └── Models.swift         # Data Models
-└── Webroot/                 # Test Web UI
-    ├── index.html
-    ├── app.js
-    └── styles.css
+│   ├── HTTPServer.swift        # HTTP + WebSocket transport (8787)
+│   ├── TTSEngine.swift         # AVSpeechSynthesizer + sentence streaming
+│   ├── AudioResampler.swift    # WAV/format helpers
+│   ├── Config.swift            # Env-var configuration
+│   ├── Models.swift            # DTOs
+│   ├── STT/
+│   │   ├── STTEngineProtocol.swift   # STTEngine / STTSession protocols
+│   │   ├── STTService.swift          # Engine selection + one-shot driver
+│   │   ├── SpeechAnalyzerEngine.swift# Default (macOS 26)
+│   │   ├── LegacySFEngine.swift      # SFSpeechRecognizer (A/B flag)
+│   │   ├── WhisperKitEngine.swift    # Optional (#if canImport(WhisperKit))
+│   │   └── AudioBufferUtil.swift     # In-memory PCM/WAV helpers
+│   └── Wyoming/
+│       ├── WyomingProtocol.swift     # Wire framing + info event
+│       └── WyomingServer.swift       # TCP server + Bonjour
+└── WebRoot/                    # Browser test UI (with latency readouts)
+STTBridgeTests/                 # Unit tests (Cmd+U)
 ```
 
-## 🐛 Known Issues
+The two transports are thin adapters over the shared `STTService` / `TTSEngine` — no recognition logic lives in the transport layer.
 
-- [ ] Performance with very long audio streams could be optimized
-- [ ] No support for batch processing
-- [ ] Auth token implementation is basic
+### Enabling the WhisperKit engine (optional)
+
+WhisperKit is gated behind `#if canImport(WhisperKit)`, so the project builds without it. To enable:
+
+1. In Xcode: **File → Add Package Dependencies…** → `https://github.com/argmaxinc/argmax-oss-swift.git` → add the **WhisperKit** product to the `STTBridge` target.
+2. Set `STT_ENGINE=whisperkit` (optionally `WHISPER_MODEL`).
+3. WhisperKit downloads its CoreML model on first use, which needs **outbound network**. The app ships sandboxed with outgoing connections **disabled** — temporarily set `ENABLE_OUTGOING_NETWORK_CONNECTIONS = YES` in the target's build settings (or pre-place the model) for the initial download, then you can disable it again.
+
+### Tests
+
+Run the unit tests with **Cmd+U** (or `xcodebuild test -scheme STTBridge -destination 'platform=macOS'`). They cover sentence chunking, engine selection, config parsing, in-memory WAV/PCM decoding, and the Wyoming `info` structure.
+
+## 🔒 Privacy / no egress
+
+The app is sandboxed with `ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO` and only incoming connections enabled, structurally guaranteeing no cloud calls. SpeechAnalyzer and WhisperKit run entirely on-device. (See the WhisperKit note above for the one-time model download exception.)
+
+## 🐛 Known Issues / Notes
+
+- `SpeechAnalyzer` uses Apple-managed models (no version pinning; may change across OS updates) — acceptable for a home assistant; WhisperKit/Parakeet exist as alternatives if German accuracy/latency disappoints.
+- The legacy engine restarts long (>~50 s) utterances; command-length utterances are unaffected.
+- AFM-3 / Siri "expressive" voices are **not** available to third-party apps; TTS uses system/enhanced voices.
 
 ## 🤝 Contributing
 
