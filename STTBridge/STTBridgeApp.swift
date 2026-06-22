@@ -24,7 +24,7 @@ struct STTBridgeApp: App {
             }
         }
         .defaultSize(width: isHeadless ? 0 : 800, height: isHeadless ? 0 : 600)
-        .windowStyle(isHeadless ? .hiddenTitleBar : .automatic)
+        .windowStyle(.hiddenTitleBar)
     }
 }
 
