@@ -4,6 +4,15 @@
 
 Native macOS server application that makes Apple's high-quality Speech Recognition and Text-to-Speech engines accessible via a **Wyoming** TCP transport (native Home Assistant) and an HTTP/WebSocket API (browser test UI + the existing custom HA integration). Built for **low-latency, fully-local** voice on an Apple Silicon home server.
 
+> **Architecture direction (June 2026):** this bridge's primary value is
+> **local, on-device STT** (Apple `SpeechAnalyzer`). For **TTS**, the recommended
+> path is a **cloud engine** in Home Assistant — a deep investigation found no
+> local German neural TTS that is simultaneously natural, low-latency, and cleanly
+> Mac-runnable. The built-in `AVSpeechSynthesizer` TTS is kept as a
+> convenience/fallback only. See
+> [`docs/decisions/0001-cloud-tts-keep-local-stt.md`](docs/decisions/0001-cloud-tts-keep-local-stt.md)
+> and the research in [`docs/research/`](docs/research/).
+
 ## ✨ Features
 
 - 🚀 **Modern streaming STT** — built on Apple's `SpeechAnalyzer` / `SpeechTranscriber` (macOS 26+, Apple Neural Engine), with live volatile (partial) results and **instant finalization** on end-of-speech.
@@ -257,23 +266,44 @@ WhisperKit is gated behind `#if canImport(WhisperKit)`, so the project builds wi
 
 Run the unit tests with **Cmd+U** (or `xcodebuild test -scheme STTBridge -destination 'platform=macOS'`). They cover sentence chunking, engine selection, config parsing, in-memory WAV/PCM decoding, and the Wyoming `info` structure.
 
-## 🗣️ Better TTS voices
+## 🎯 STT accuracy & context enrichment
 
-`AVSpeechSynthesizer` (and therefore this bridge) **cannot use Siri's voices** —
-Apple does not expose the Siri / AFM-3 "expressive" voices to third-party apps,
-and there is no announced change for a future macOS. The realistic best option
-is a **Premium** system voice, which sounds far better than the default "Anna":
+The default engine (`SpeechAnalyzer` + `SpeechTranscriber`) is Apple's most
+accurate on-device transcriber and benchmarks very well on **clean German
+commands**; accuracy drops on hesitant/noisy speech. A key constraint when trying
+to bias recognition toward Home-Assistant entity/room/device names:
+
+> **`SpeechTranscriber` (our default) cannot be biased with contextual strings**
+> (confirmed by Apple). Vocabulary enrichment therefore requires a trade-off —
+> either drop to `DictationTranscriber` (`AnalysisContext.contextualStrings`, new
+> API, lower base accuracy) or to the legacy `SFSpeechRecognizer` engine with
+> `contextualStrings` / a `SFCustomLanguageModelData` custom LM (most powerful:
+> weighted phrases, intent templates, custom pronunciations).
+
+Cheap reliability wins that **keep** the high-accuracy engine: gate on
+`transcriptionConfidence`, act only on finalized (not volatile) results, and
+pre-reserve the `de-DE` asset for a warm start. Full analysis, API references and
+a recommended rollout order are in
+[`docs/research/2026-06-stt-context-enrichment.md`](docs/research/2026-06-stt-context-enrichment.md).
+
+## 🗣️ TTS voices (local fallback)
+
+TTS output is best served by a **cloud engine** in Home Assistant (see the
+architecture note at the top). The built-in `AVSpeechSynthesizer` path is a local
+fallback only and **cannot use Siri's voices** — Apple does not expose the Siri /
+AFM-3 "expressive" voices to third-party apps. If you do use the local fallback,
+a **Premium** system voice sounds far better than the default "Anna":
 
 1. **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**
 2. Pick your language (e.g. German) and download a **Premium** variant.
-3. Restart the bridge. It now auto-selects the highest-quality voice
+3. Restart the bridge. It auto-selects the highest-quality voice
    (Premium > Enhanced > Default); pick a specific one in the browser UI, via
-   `?voiceId=…`, or in Home Assistant's TTS voice dropdown (the bridge advertises
-   all installed voices, re-discovered on reconnect).
+   `?voiceId=…`, or in Home Assistant's TTS voice dropdown.
 
-If you want a genuinely neural, Siri-like voice, the path is a local neural TTS
-engine (e.g. Piper/Kokoro/argmax TTSKit) wired in as an alternate backend — a
-larger change than the system voices above.
+Why not a *local neural* German TTS? A deep investigation
+([`docs/research/2026-06-local-german-tts.md`](docs/research/2026-06-local-german-tts.md))
+found none that is natural + low-latency + cleanly Mac-runnable today — hence the
+cloud-TTS decision.
 
 ## 🔒 Privacy / no egress
 
