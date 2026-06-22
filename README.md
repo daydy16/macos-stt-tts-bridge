@@ -257,6 +257,24 @@ WhisperKit is gated behind `#if canImport(WhisperKit)`, so the project builds wi
 
 Run the unit tests with **Cmd+U** (or `xcodebuild test -scheme STTBridge -destination 'platform=macOS'`). They cover sentence chunking, engine selection, config parsing, in-memory WAV/PCM decoding, and the Wyoming `info` structure.
 
+## 🗣️ Better TTS voices
+
+`AVSpeechSynthesizer` (and therefore this bridge) **cannot use Siri's voices** —
+Apple does not expose the Siri / AFM-3 "expressive" voices to third-party apps,
+and there is no announced change for a future macOS. The realistic best option
+is a **Premium** system voice, which sounds far better than the default "Anna":
+
+1. **System Settings → Accessibility → Spoken Content → System Voice → Manage Voices…**
+2. Pick your language (e.g. German) and download a **Premium** variant.
+3. Restart the bridge. It now auto-selects the highest-quality voice
+   (Premium > Enhanced > Default); pick a specific one in the browser UI, via
+   `?voiceId=…`, or in Home Assistant's TTS voice dropdown (the bridge advertises
+   all installed voices, re-discovered on reconnect).
+
+If you want a genuinely neural, Siri-like voice, the path is a local neural TTS
+engine (e.g. Piper/Kokoro/argmax TTSKit) wired in as an alternate backend — a
+larger change than the system voices above.
+
 ## 🔒 Privacy / no egress
 
 The app is sandboxed with `ENABLE_OUTGOING_NETWORK_CONNECTIONS = NO` and only incoming connections enabled, structurally guaranteeing no cloud calls. SpeechAnalyzer and WhisperKit run entirely on-device. (See the WhisperKit note above for the one-time model download exception.)

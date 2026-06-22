@@ -29,16 +29,18 @@ final class TTSEngine: NSObject, AVSpeechSynthesizerDelegate {
         if let id = voiceId, !id.isEmpty, let v = AVSpeechSynthesisVoice(identifier: id) {
             u.voice = v
         } else {
-            // Prefer a language match (default de-DE), highest quality, "Anna" first.
+            // Otherwise pick the highest-quality voice for the language
+            // (Premium > Enhanced > Default). Download Premium voices in
+            // System Settings → Accessibility → Spoken Content → System Voice.
             let targetLang = language ?? "de-DE"
-            let candidates = AVSpeechSynthesisVoice.speechVoices().filter { $0.language == targetLang }
-            if let annaBest = candidates
-                .filter({ $0.name == "Anna" })
-                .sorted(by: { $0.quality.rawValue > $1.quality.rawValue })
-                .first {
-                u.voice = annaBest
-            } else if let bestMatch = candidates.sorted(by: { $0.quality.rawValue > $1.quality.rawValue }).first {
-                u.voice = bestMatch
+            let langPrefix = String(targetLang.prefix(2)).lowercased()
+            let all = AVSpeechSynthesisVoice.speechVoices()
+            var candidates = all.filter { $0.language == targetLang }
+            if candidates.isEmpty {
+                candidates = all.filter { $0.language.lowercased().hasPrefix(langPrefix) }
+            }
+            if let best = candidates.max(by: { $0.quality.rawValue < $1.quality.rawValue }) {
+                u.voice = best
             }
         }
 

@@ -65,13 +65,21 @@ const initVoices = async () => {
     const res = await fetch('/voices');
     const voices = await res.json();
     const sel = document.getElementById('voiceId');
-    voices.sort((a, b) => a.name.localeCompare(b.name)).forEach(v => {
+    const qLabel = q => q === 3 ? 'Premium' : q === 2 ? 'Enhanced' : 'Default';
+    const lang = (document.getElementById('lang').value || 'de').slice(0, 2).toLowerCase();
+
+    voices.sort((a, b) => (b.quality - a.quality) || a.name.localeCompare(b.name)).forEach(v => {
       const opt = document.createElement('option');
       opt.value = v.identifier;
-      opt.textContent = `${v.name} (${v.language}) - ${v.quality === 2 ? 'Enhanced' : 'Default'}`;
-      if (v.name === 'Anna' && v.quality === 2) opt.selected = true;
+      opt.textContent = `${v.name} (${v.language}) – ${qLabel(v.quality)}`;
       sel.appendChild(opt);
     });
+
+    // Pre-select the highest-quality voice for the chosen language.
+    const best = voices
+      .filter(v => v.language.toLowerCase().startsWith(lang))
+      .sort((a, b) => b.quality - a.quality)[0];
+    if (best) sel.value = best.identifier;
   } catch (e) { console.error('Failed to load voices', e); }
 };
 
