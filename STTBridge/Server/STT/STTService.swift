@@ -60,10 +60,12 @@ nonisolated final class STTService: @unchecked Sendable {
 
         var text = ""
         var confidence: Double?
+        var errorMessage: String?
         for await result in session.results where result.isFinal {
-            text = result.text
-            confidence = result.confidence
+            if let err = result.error { errorMessage = err }
+            else { text = result.text; confidence = result.confidence }
         }
+        if let errorMessage { throw APIError.internalError(errorMessage) }
         return STTResponse(text: text, isFinal: true, confidence: confidence, words: [])
     }
 

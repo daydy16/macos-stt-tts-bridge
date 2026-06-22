@@ -48,9 +48,16 @@ nonisolated final class LegacySFSession: STTSession, @unchecked Sendable {
     private let request = SFSpeechAudioBufferRecognitionRequest()
     private var task: SFSpeechRecognitionTask?
 
+    /// Safety net: SFSpeechRecognizer occasionally neither delivers a final
+    /// result nor an error after `endAudio()` (e.g. very short/silent audio).
+    /// Without this, `finishAudio()` would await forever.
+    private let finalizeTimeout: TimeInterval = 8
+
     private let lock = NSLock()
     private var didFinish = false
     private var finalContinuation: CheckedContinuation<Void, Never>?
+    private var lastText = ""
+    private var converter: AVAudioConverter?
 
     init(recognizer: SFSpeechRecognizer, requireOnDevice: Bool) throws {
         var cont: AsyncStream<STTResult>.Continuation!
@@ -69,11 +76,13 @@ nonisolated final class LegacySFSession: STTSession, @unchecked Sendable {
             guard let self else { return }
             if let error {
                 NSLog("Legacy STT error: \(error.localizedDescription)")
+                self.resultsCont.yield(.failure("Spracherkennung fehlgeschlagen: \(error.localizedDescription)"))
                 self.complete()
                 return
             }
             guard let result else { return }
             let text = result.bestTranscription.formattedString
+            self.lock.lock(); self.lastText = text; self.lock.unlock()
             if result.isFinal {
                 let segs = result.transcriptions.first?.segments ?? []
                 let conf = segs.isEmpty
@@ -88,11 +97,41 @@ nonisolated final class LegacySFSession: STTSession, @unchecked Sendable {
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        request.append(buffer)
+        // Restore the old behavior of feeding a consistent 16 kHz mono format.
+        let canonical = AudioBufferUtil.canonicalFormat
+        if buffer.format == canonical {
+            request.append(buffer)
+            return
+        }
+        lock.lock()
+        if converter == nil { converter = AVAudioConverter(from: buffer.format, to: canonical) }
+        let conv = converter
+        lock.unlock()
+        if let conv, let out = AudioBufferUtil.convert(buffer, using: conv, to: canonical) {
+            request.append(out)
+        } else {
+            request.append(buffer)
+        }
     }
 
     func finishAudio() async {
         request.endAudio()
+
+        // Arm a timeout that finalizes with the best partial we have.
+        let timeout = finalizeTimeout
+        Task { [weak self] in
+            try? await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+            guard let self else { return }
+            self.lock.lock()
+            let done = self.didFinish
+            let text = self.lastText
+            self.lock.unlock()
+            guard !done else { return }
+            NSLog("Legacy STT finalize timed out; returning best partial.")
+            self.resultsCont.yield(STTResult(text: text, isFinal: true))
+            self.complete()
+        }
+
         await withCheckedContinuation { (cont: CheckedContinuation<Void, Never>) in
             lock.lock()
             if didFinish {

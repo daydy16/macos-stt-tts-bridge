@@ -149,31 +149,32 @@ nonisolated final class WyomingConnectionHandler: ChannelInboundHandler, @unchec
     }
 
     private func attachSession(_ s: STTSession) {
+        // Flip ready + replay buffered audio atomically so a concurrent live
+        // audio-chunk can't be appended before the buffered chunks.
         lock.lock()
         session = s
-        ready = true
         let buffered = pending
         pending.removeAll()
+        for d in buffered { feedLocked(d, to: s) }
+        ready = true
         lock.unlock()
-        for d in buffered { append(d) }
     }
 
     private func handleAudioChunk(_ payload: Data) {
         lock.lock()
-        let isReady = ready
-        if !isReady { pending.append(payload) }
+        if ready, let s = session {
+            feedLocked(payload, to: s)
+        } else {
+            pending.append(payload)
+        }
         lock.unlock()
-        if isReady { append(payload) }
     }
 
-    private func append(_ data: Data) {
-        lock.lock()
-        let sr = inputSampleRate
-        let ch = inputChannels
-        let s = session
-        lock.unlock()
-        guard let buffer = AudioBufferUtil.int16Buffer(from: data, sampleRate: sr, channels: ch) else { return }
-        s?.append(buffer)
+    /// Caller must hold `lock`. Conversion and `session.append` are both
+    /// non-blocking, so holding the lock keeps chunk ordering correct.
+    private func feedLocked(_ data: Data, to s: STTSession) {
+        guard let buffer = AudioBufferUtil.int16Buffer(from: data, sampleRate: inputSampleRate, channels: inputChannels) else { return }
+        s.append(buffer)
     }
 
     private func handleAudioStop() {
@@ -188,8 +189,12 @@ nonisolated final class WyomingConnectionHandler: ChannelInboundHandler, @unchec
             await s.finishAudio()
             var text = ""
             for await result in s.results where result.isFinal { text = result.text }
-            self?.send(WyomingEvent(type: "transcript", data: ["text": text]))
-            self?.lock.lock(); self?.session = nil; self?.lock.unlock()
+            guard let self else { return }
+            self.send(WyomingEvent(type: "transcript", data: ["text": text]))
+            self.lock.lock()
+            // Only clear if a newer utterance hasn't already replaced the session.
+            if self.session === s { self.session = nil; self.ready = false }
+            self.lock.unlock()
         }
     }
 
@@ -220,10 +225,18 @@ nonisolated final class WyomingConnectionHandler: ChannelInboundHandler, @unchec
 
     // MARK: - Helpers
 
+    /// Map a possibly-bare language code to a BCP-47 locale. Never fabricates a
+    /// bogus region (e.g. "en" must not become "en-EN").
     private func normalizeLang(_ raw: String) -> String {
         if raw.contains("-") { return raw }
-        if cfg.defaultLang.lowercased().hasPrefix(raw.lowercased()) { return cfg.defaultLang }
-        return "\(raw)-\(raw.uppercased())"
+        let lower = raw.lowercased()
+        if cfg.defaultLang.lowercased().hasPrefix(lower) { return cfg.defaultLang }
+        let common = [
+            "de": "de-DE", "en": "en-US", "fr": "fr-FR", "es": "es-ES",
+            "it": "it-IT", "nl": "nl-NL", "pt": "pt-PT", "ja": "ja-JP",
+            "zh": "zh-CN", "ko": "ko-KR", "ru": "ru-RU"
+        ]
+        return common[lower] ?? raw
     }
 
     private func send(_ event: WyomingEvent) {

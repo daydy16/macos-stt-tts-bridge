@@ -17,20 +17,32 @@ Native macOS server application that makes Apple's high-quality Speech Recogniti
 
 ## 🚀 Quick Start
 
-### Installation
+### Run from source (current path — no prebuilt release yet)
 
-1. **Download the app:**
+```bash
+git clone https://github.com/daydy16/macos-stt-tts-bridge.git
+cd macos-stt-tts-bridge
+open STTBridge.xcodeproj
+# In Xcode: select the STTBridge scheme → Run (Cmd+R)
+```
 
-   ```bash
-   # Download the latest version from Releases
-   # Extract and move to /Applications
-   ```
+On first launch:
+- Allow **microphone** and **speech recognition** when prompted (the GUI mic test needs them; the network transports do not).
+- macOS downloads the `de-DE` SpeechAnalyzer assets once in the background. If recognition returns an error about a missing locale, install German dictation assets via **System Settings → Keyboard → Dictation** (or Accessibility → Spoken Content) and retry.
 
-2. **Start with UI:**
-   - Double-click on `STTBridge.app`
-   - Allow microphone access when prompted
+Then open the test UI at **http://localhost:8787** (live partials, final, and TTS latency readouts). Home Assistant connects to the Wyoming transport on port **10700** (see below).
 
-3. **Start headless (without UI):**
+Engine/ports are configured via environment variables (see **Configuration**); e.g. run headless with a chosen engine:
+
+```bash
+STT_ENGINE=speechanalyzer ./build/STTBridge.app/Contents/MacOS/STTBridge --headless
+```
+
+### Install as a packaged app
+
+1. In Xcode: **Product → Archive → Distribute App → Copy App**, then move `STTBridge.app` to `/Applications`.
+2. **Start with UI:** double-click `STTBridge.app` and allow microphone access.
+3. **Start headless (no window):**
 
    ```bash
    /Applications/STTBridge.app/Contents/MacOS/STTBridge --headless

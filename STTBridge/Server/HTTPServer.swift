@@ -320,6 +320,9 @@ nonisolated final class HTTPServer {
             headers.add(name: "X-Channel-Count", value: "1")
             headers.add(name: "Cache-Control", value: "no-store")
             headers.add(name: "Transfer-Encoding", value: "chunked") // stream chunks as synthesized
+            // Close after the stream so a streamed body can't interleave with a
+            // pipelined request's response on a keep-alive connection.
+            headers.add(name: "Connection", value: "close")
             let respHead = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
             context.write(self.wrapOutboundOut(.head(respHead)), promise: nil)
             context.flush()
@@ -329,11 +332,15 @@ nonisolated final class HTTPServer {
             Task { @MainActor in
                 let stream = tts.synthesizeStream(text: text, voiceId: voiceId, rate: rate, pitch: pitch, language: lang, sampleRate: sr)
                 for await pcm in stream {
+                    guard channel.isActive else { return } // client disconnected mid-stream
                     var buf = channel.allocator.buffer(capacity: pcm.count)
                     buf.writeBytes(pcm)
                     channel.writeAndFlush(HTTPServerResponsePart.body(.byteBuffer(buf)), promise: nil)
                 }
-                channel.writeAndFlush(HTTPServerResponsePart.end(nil), promise: nil)
+                guard channel.isActive else { return }
+                channel.writeAndFlush(HTTPServerResponsePart.end(nil)).whenComplete { _ in
+                    channel.close(promise: nil)
+                }
             }
         }
     }
@@ -358,6 +365,8 @@ nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecke
     private var pending: [Data] = []
     private var ready = false
     private var ended = false
+    private var graceful = false
+    private var consumeTask: Task<Void, Never>?
 
     init(service: STTService, lang: String, requireOnDevice: Bool, sendPartials: Bool) {
         self.service = service
@@ -389,19 +398,18 @@ nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecke
             var d = frame.data
             guard let payload = d.readData(length: d.readableBytes) else { return }
             lock.lock()
-            let isReady = ready
-            if !isReady { pending.append(payload) }
+            if ready, let s = session { feedLocked(payload, to: s) }
+            else { pending.append(payload) }
             lock.unlock()
-            if isReady { feed(payload) }
         case .text:
             var d = frame.data
             if let payload = d.readData(length: d.readableBytes),
                let obj = try? JSONSerialization.jsonObject(with: payload) as? [String: Any],
                (obj["type"] as? String) == "end" {
-                endStream()
+                endStream(graceful: true)
             }
         case .connectionClose:
-            endStream()
+            endStream(graceful: false)
             context.close(promise: nil)
         default:
             break
@@ -409,7 +417,7 @@ nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecke
     }
 
     func handlerRemoved(context: ChannelHandlerContext) {
-        endStream()
+        endStream(graceful: false)
     }
 
     // MARK: - Session wiring
@@ -417,18 +425,20 @@ nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecke
     private func attach(_ session: STTSession) {
         lock.lock()
         self.session = session
-        ready = true
         let buffered = pending
         pending.removeAll()
+        for data in buffered { feedLocked(data, to: session) } // replay before going live
+        ready = true
         let alreadyEnded = ended
+        let wasGraceful = graceful
         lock.unlock()
 
-        for data in buffered { feed(data) }
-
-        Task { [weak self] in
+        let task = Task { [weak self] in
             for await result in session.results {
                 guard let self else { return }
-                if result.isFinal {
+                if let err = result.error {
+                    self.send(json: ["type": "error", "error": err])
+                } else if result.isFinal {
                     var obj: [String: Any] = ["type": "final", "text": result.text]
                     if let c = result.confidence { obj["confidence"] = c }
                     self.send(json: obj)
@@ -437,24 +447,38 @@ nonisolated final class WebSocketStreamHandler: ChannelInboundHandler, @unchecke
                 }
             }
         }
+        lock.lock(); consumeTask = task; lock.unlock()
 
-        // The client may have ended before the session was ready.
-        if alreadyEnded { Task { await session.finishAudio() } }
+        // The client may have ended before the session became ready.
+        if alreadyEnded {
+            if wasGraceful { Task { await session.finishAudio() } }
+            else { session.cancel(); task.cancel() }
+        }
     }
 
-    private func feed(_ data: Data) {
+    /// Caller must hold `lock`. Conversion and `session.append` are non-blocking,
+    /// so holding the lock keeps chunk ordering correct (buffered replay can't
+    /// interleave with a live frame).
+    private func feedLocked(_ data: Data, to s: STTSession) {
         guard let buffer = AudioBufferUtil.int16Buffer(from: data, sampleRate: 16_000, channels: 1) else { return }
-        lock.lock(); let s = session; lock.unlock()
-        s?.append(buffer)
+        s.append(buffer)
     }
 
-    private func endStream() {
+    private func endStream(graceful: Bool) {
         lock.lock()
         if ended { lock.unlock(); return }
         ended = true
+        self.graceful = graceful
         let s = session
+        let task = consumeTask
         lock.unlock()
-        if let s { Task { await s.finishAudio() } }
+        guard let s else { return } // not ready yet; attach() will honor `ended`/`graceful`
+        if graceful {
+            Task { await s.finishAudio() }
+        } else {
+            s.cancel()
+            task?.cancel()
+        }
     }
 
     func send(json: [String: Any]) {

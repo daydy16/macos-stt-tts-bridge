@@ -9,11 +9,20 @@ nonisolated struct STTResult: Sendable {
     let text: String
     let isFinal: Bool
     let confidence: Double?
+    /// Non-nil when recognition failed mid-stream; transports surface this to
+    /// the client instead of silently ending the stream.
+    let error: String?
 
-    init(text: String, isFinal: Bool, confidence: Double? = nil) {
+    init(text: String, isFinal: Bool, confidence: Double? = nil, error: String? = nil) {
         self.text = text
         self.isFinal = isFinal
         self.confidence = confidence
+        self.error = error
+    }
+
+    /// A terminal error result.
+    static func failure(_ message: String) -> STTResult {
+        STTResult(text: "", isFinal: true, error: message)
     }
 }
 

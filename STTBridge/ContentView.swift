@@ -15,13 +15,15 @@ class AppViewModel: ObservableObject {
     @Published var sttText: String = ""
     @Published var isRecording: Bool = false
 
-    private let ttsEngine = TTSEngine()
-    private let stt = STTService(config: Config())
+    private let ttsEngine: TTSEngine
+    private let stt: STTService
     private var sttSession: STTSession?
     private var resultsTask: Task<Void, Never>?
     private var audioEngine: AVAudioEngine?
 
-    init() {
+    init(stt: STTService, tts: TTSEngine) {
+        self.stt = stt
+        self.ttsEngine = tts
         loadVoices()
     }
 
@@ -90,9 +92,10 @@ class AppViewModel: ObservableObject {
                 self.sttSession = session
 
                 // Forward partial + final results to the UI.
-                self.resultsTask = Task { @MainActor in
+                self.resultsTask = Task { @MainActor [weak self] in
                     for await result in session.results {
-                        self.sttText = result.text
+                        if let err = result.error { self?.sttText = "Fehler: \(err)" }
+                        else { self?.sttText = result.text }
                     }
                 }
 
@@ -128,7 +131,12 @@ class AppViewModel: ObservableObject {
 // MARK: - ContentView
 struct ContentView: View {
     let status: String // From ServerManager
-    @StateObject private var viewModel = AppViewModel()
+    @StateObject private var viewModel: AppViewModel
+
+    init(status: String, stt: STTService, tts: TTSEngine) {
+        self.status = status
+        _viewModel = StateObject(wrappedValue: AppViewModel(stt: stt, tts: tts))
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {

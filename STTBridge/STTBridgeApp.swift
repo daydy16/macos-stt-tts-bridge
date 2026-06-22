@@ -20,7 +20,7 @@ struct STTBridgeApp: App {
                     .frame(width: 0, height: 0)
                     .hidden()
             } else {
-                ContentView(status: serverMgr.status)
+                ContentView(status: serverMgr.status, stt: serverMgr.stt, tts: serverMgr.tts)
             }
         }
         .defaultSize(width: isHeadless ? 0 : 800, height: isHeadless ? 0 : 600)
@@ -30,6 +30,8 @@ struct STTBridgeApp: App {
 
 final class ServerManager: ObservableObject {
     @Published var status: String = "Startet…"
+    let stt: STTService
+    let tts: TTSEngine
     private var httpServer: HTTPServer?
     private var wyomingServer: WyomingServer?
 
@@ -43,6 +45,8 @@ final class ServerManager: ObservableObject {
         let cfg = Config()
         let stt = STTService(config: cfg)
         let tts = TTSEngine()
+        self.stt = stt
+        self.tts = tts
 
         let headless = CommandLine.arguments.contains("--headless") ||
                        CommandLine.arguments.contains("--no-ui")

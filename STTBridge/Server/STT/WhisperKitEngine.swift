@@ -68,6 +68,11 @@ nonisolated final class WhisperKitSession: STTSession, @unchecked Sendable {
     private let whisperKit: WhisperKit
     private let language: String
 
+    /// Partials only re-transcribe a bounded tail window (cheap, ~constant cost
+    /// per tick); the full buffer is transcribed once at finishAudio. This
+    /// avoids O(n²) re-transcription of the whole growing utterance.
+    private let maxPartialSamples = 16_000 * 12 // ~12 s
+
     private let lock = NSLock()
     private var converter: AVAudioConverter?
     private var samples: [Float] = []
@@ -127,7 +132,7 @@ nonisolated final class WhisperKitSession: STTSession, @unchecked Sendable {
                 guard let self else { return }
                 self.lock.lock()
                 let done = self.finished
-                let snap = self.samples
+                let snap = Array(self.samples.suffix(self.maxPartialSamples)) // bounded tail
                 self.lock.unlock()
                 if done { return }
                 guard snap.count > 8_000 else { continue } // ~0.5 s of 16 kHz audio

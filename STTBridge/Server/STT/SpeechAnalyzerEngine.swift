@@ -111,6 +111,7 @@ nonisolated final class SpeechAnalyzerSession: STTSession, @unchecked Sendable {
                 }
             } catch {
                 NSLog("SpeechAnalyzer results error: \(error)")
+                resultsCont.yield(.failure("Spracherkennung fehlgeschlagen: \(error.localizedDescription)"))
             }
             resultsCont.finish()
         }
