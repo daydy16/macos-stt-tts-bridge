@@ -9,6 +9,11 @@ import AVFoundation
 ///
 /// Language assets are system-managed (downloaded once via `AssetInventory`,
 /// not bundled with the app). German (`de-DE`) is supported.
+///
+/// Finalized results carry a per-run confidence attribute
+/// (`.transcriptionConfidence`), averaged into ``STTResult/confidence`` so callers
+/// can gate low-confidence commands without giving up `SpeechTranscriber`'s
+/// accuracy (which, unlike `DictationTranscriber`, cannot be vocabulary-biased).
 nonisolated final class SpeechAnalyzerEngine: STTEngine, @unchecked Sendable {
     let id = "speechanalyzer"
 
@@ -45,10 +50,16 @@ nonisolated final class SpeechAnalyzerEngine: STTEngine, @unchecked Sendable {
     // MARK: - Internals
 
     private func makeTranscriber(locale: Locale) -> SpeechTranscriber {
+        // `.transcriptionConfidence` attaches a confidence attribute to finalized
+        // result runs so callers can gate low-confidence commands (surfaced on the
+        // HTTP/WS path and logged on Wyoming). `SpeechTranscriber` itself stays the
+        // high-accuracy module — it cannot be biased with contextual strings, so
+        // confidence is our no-trade-off reliability lever (see
+        // docs/research/2026-06-stt-context-enrichment.md).
         SpeechTranscriber(locale: locale,
                           transcriptionOptions: [],
                           reportingOptions: [.volatileResults],
-                          attributeOptions: [.audioTimeRange])
+                          attributeOptions: [.audioTimeRange, .transcriptionConfidence])
     }
 
     /// Verify the locale is supported, install its assets if missing, and
@@ -107,7 +118,10 @@ nonisolated final class SpeechAnalyzerSession: STTSession, @unchecked Sendable {
             do {
                 for try await result in transcriber.results {
                     let text = String(result.text.characters)
-                    resultsCont.yield(STTResult(text: text, isFinal: result.isFinal))
+                    let confidence = Self.averageConfidence(of: result.text)
+                    resultsCont.yield(STTResult(text: text,
+                                                isFinal: result.isFinal,
+                                                confidence: confidence))
                 }
             } catch {
                 NSLog("SpeechAnalyzer results error: \(error)")
@@ -162,5 +176,21 @@ nonisolated final class SpeechAnalyzerSession: STTSession, @unchecked Sendable {
         let analyzer = self.analyzer
         Task { await analyzer.cancelAndFinishNow() }
         resultsCont.finish()
+    }
+
+    /// Average the per-run confidence attribute (present on finalized results when
+    /// `.transcriptionConfidence` is requested). Returns `nil` for volatile results
+    /// or when the OS attaches no confidence. Read via the attribute key type to
+    /// avoid depending on the dynamic-member spelling.
+    private static func averageConfidence(of text: AttributedString) -> Double? {
+        var sum = 0.0
+        var count = 0
+        for run in text.runs {
+            if let value = run[AttributeScopes.SpeechAttributes.ConfidenceAttribute.self] {
+                sum += Double(value)
+                count += 1
+            }
+        }
+        return count > 0 ? sum / Double(count) : nil
     }
 }

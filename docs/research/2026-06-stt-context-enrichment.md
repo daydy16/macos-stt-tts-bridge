@@ -118,6 +118,10 @@ Pragmatic ordering:
 1. **Cheap reliability wins first (no biasing, keep `SpeechTranscriber`):** surface
    `transcriptionConfidence`, keep acting only on finals, ensure warm
    start/asset-reserve. These improve reliability without giving up accuracy.
+   **(Implemented 2026-06-22:** the `SpeechAnalyzer` engine now requests
+   `.transcriptionConfidence`, averages it into `STTResult.confidence` — returned
+   on the HTTP/WS path and logged as a warning on Wyoming below 0.5. Warm
+   start/asset-reserve already exist via `prewarm`/`AssetInventory.reserve`.)
 2. **If entity-name misrecognition is the real pain:** add an optional vocabulary
    source (env var / file / small `POST /vocabulary` endpoint, or pull from HA),
    then bias via **`SFSpeechRecognitionRequest.contextualStrings`** on the legacy

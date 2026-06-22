@@ -188,8 +188,18 @@ nonisolated final class WyomingConnectionHandler: ChannelInboundHandler, @unchec
         Task { [weak self] in
             await s.finishAudio()
             var text = ""
-            for await result in s.results where result.isFinal { text = result.text }
+            var confidence: Double?
+            for await result in s.results where result.isFinal {
+                text = result.text
+                confidence = result.confidence
+            }
             guard let self else { return }
+            // The Wyoming `transcript` event carries no confidence field, so we
+            // can't pass it to HA — but a low score is worth flagging in the log
+            // for diagnosing misrecognitions.
+            if let confidence, confidence < 0.5 {
+                NSLog("Wyoming STT low confidence (%.2f): \"%@\"", confidence, text)
+            }
             self.send(WyomingEvent(type: "transcript", data: ["text": text]))
             self.lock.lock()
             // Only clear if a newer utterance hasn't already replaced the session.

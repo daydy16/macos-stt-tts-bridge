@@ -282,8 +282,11 @@ to bias recognition toward Home-Assistant entity/room/device names:
 
 Cheap reliability wins that **keep** the high-accuracy engine: gate on
 `transcriptionConfidence`, act only on finalized (not volatile) results, and
-pre-reserve the `de-DE` asset for a warm start. Full analysis, API references and
-a recommended rollout order are in
+pre-reserve the `de-DE` asset for a warm start. The bridge now requests
+`.transcriptionConfidence` and surfaces an averaged confidence on finalized
+results — returned in the `POST /stt` / WebSocket `final` payloads, and logged as
+a warning on the Wyoming path when it drops below `0.5`. Full analysis, API
+references and a recommended rollout order are in
 [`docs/research/2026-06-stt-context-enrichment.md`](docs/research/2026-06-stt-context-enrichment.md).
 
 ## 🗣️ TTS voices (local fallback)
